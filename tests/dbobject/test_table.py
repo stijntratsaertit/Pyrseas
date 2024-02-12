@@ -7,6 +7,7 @@ from pyrseas.testutils import DatabaseToMapTestCase
 from pyrseas.testutils import InputMapToSqlTestCase, fix_indent
 
 CREATE_STMT = "CREATE TABLE sd.t1 (c1 integer, c2 text)"
+DROP_STMT = "DROP TABLE sd.t1"
 COMMENT_STMT = "COMMENT ON TABLE sd.t1 IS 'Test table t1'"
 CREATE_STOR_PARAMS = CREATE_STMT + \
     " WITH (fillfactor=90, autovacuum_enabled=false)"
@@ -181,6 +182,15 @@ class TableToSqlTestCase(InputMapToSqlTestCase):
         sql = self.to_sql(inmap)
         assert fix_indent(sql[0]) == CREATE_STMT
 
+    def test_revert_create_table_simple(self):
+        "Revert the creation of a table"
+        inmap = self.std_map()
+        inmap['schema sd'].update({'table t1': {
+            'columns': [{'c1': {'type': 'integer'}},
+                        {'c2': {'type': 'text'}}]}})
+        sql = self.to_sql(inmap, revert=True)
+        assert sql == [DROP_STMT]
+
     def test_create_table_quoted_idents(self):
         "Create a table needing quoted identifiers"
         inmap = self.std_map()
@@ -210,7 +220,7 @@ class TableToSqlTestCase(InputMapToSqlTestCase):
     def test_drop_table(self):
         "Drop an existing table"
         sql = self.to_sql(self.std_map(), [CREATE_STMT])
-        assert sql == ["DROP TABLE sd.t1"]
+        assert sql == [DROP_STMT]
 
     def test_rename_table(self):
         "Rename an existing table"
@@ -297,6 +307,114 @@ class TableToSqlTestCase(InputMapToSqlTestCase):
             "CREATE TABLE sd.t1a PARTITION OF t1 FOR VALUES %s" % spec1)
         assert fix_indent(sql[2]) == (
             "CREATE TABLE sd.t1b PARTITION OF t1 FOR VALUES %s" % spec2)
+
+
+class TableUndoSqlTestCase(InputMapToSqlTestCase):
+    """Test SQL generation to revert table statements"""
+
+    def test_undo_create_table_simple(self):
+        "Revert the creation of a table"
+        inmap = self.std_map()
+        inmap['schema sd'].update({'table t1': {
+            'columns': [{'c1': {'type': 'integer'}},
+                        {'c2': {'type': 'text'}}]}})
+        sql = self.to_sql(inmap, revert=True)
+        assert fix_indent(sql[0]) == DROP_STMT
+
+    def test_undo_create_table_quoted_idents(self):
+        "Revert the creation of a table needing quoted identifiers"
+        inmap = self.std_map()
+        inmap['schema sd'].update({'table order': {
+            'columns': [{'primary': {'type': 'integer'}},
+                        {'two words': {'type': 'text'}}]}})
+        sql = self.to_sql(inmap, quote_reserved=True, revert=True)
+        assert fix_indent(sql[0]) == 'DROP TABLE sd."order"'
+
+    def test_undo_drop_table(self):
+        "Revert dropping a table"
+        sql = self.to_sql(self.std_map(), [CREATE_STMT], revert=True)
+        assert fix_indent(sql[0]) == CREATE_STMT
+
+    def test_undo_rename_table(self):
+        "Revert renaming a table"
+        inmap = self.std_map()
+        inmap['schema sd'].update({'table t2': {
+            'oldname': 't1',
+            'columns': [{'c1': {'type': 'integer'}},
+                        {'c2': {'type': 'text'}}]}})
+        sql = self.to_sql(inmap, [CREATE_STMT], revert=True)
+        assert sql == ["ALTER TABLE sd.t2 RENAME TO sd.t1"]
+
+    def test_undo_create_table_options(self):
+        "Revert creation of a table with options"
+        inmap = self.std_map()
+        inmap['schema sd'].update({'table t1': {
+            'columns': [{'c1': {'type': 'integer'}},
+                        {'c2': {'type': 'text'}}],
+            'options': ["fillfactor=90", "autovacuum_enabled=false"]}})
+        sql = self.to_sql(inmap, revert=True)
+        assert fix_indent(sql[0]) == DROP_STMT
+
+    def test_undo_change_table_options(self):
+        "Revert a change to a table's storage parameters"
+        inmap = self.std_map()
+        inmap['schema sd'].update({'table t1': {
+            'columns': [{'c1': {'type': 'integer'}},
+                        {'c2': {'type': 'text'}}],
+            'options': ["fillfactor=70"]}})
+        sql = self.to_sql(inmap, [CREATE_STOR_PARAMS], revert=True)
+        assert fix_indent(sql[0]) == "ALTER TABLE sd.t1 SET (fillfactor=90, " \
+            "autovacuum_enabled=false)"
+
+    def test_undo_create_table_within_schema(self):
+        "Revert creation of a new schema and a table within it"
+        inmap = self.std_map()
+        inmap.update({'schema s1': {'table t1': {
+            'columns': [{'c1': {'type': 'integer'}},
+                        {'c2': {'type': 'text'}}]}}})
+        sql = self.to_sql(inmap, revert=True)
+        expsql = ["DROP TABLE s1.t1", "DROP SCHEMA s1"]
+        for i in range(len(expsql)):
+            assert fix_indent(sql[i]) == expsql[i]
+
+    def test_undo_unlogged_table(self):
+        "Revert creation of an unlogged table"
+        inmap = self.std_map()
+        inmap['schema sd'].update({'table t1': {
+            'columns': [{'c1': {'type': 'integer'}},
+                        {'c2': {'type': 'text'}}], 'unlogged': True}})
+        sql = self.to_sql(inmap, revert=True)
+        assert fix_indent(sql[0]) == DROP_STMT
+
+    def test_undo_table_owned_by_sequence(self):
+        "Revert altering a table to be owned by a table column"
+        inmap = self.std_map()
+        inmap['schema sd'].update({'table t1': {
+            'columns': [{'c1': {'type': 'integer'}},
+                        {'c2': {'type': 'text'}}]},
+            'sequence seq1': {
+                'cache_value': 1, 'increment_by': 1, 'max_value': None,
+                'min_value': None, 'start_value': 1,
+                'owner_table': 't1', 'owner_column': 'c1'}})
+        sql = self.to_sql(inmap, [CREATE_STMT, "CREATE SEQUENCE seq1"], revert=True)
+        assert fix_indent(sql[0]) == "ALTER SEQUENCE sd.seq1 OWNED BY NONE"
+
+    def test_undo_create_partitioned_tables(self):
+        "Revert creation of a partitioned table and two partitions"
+        inmap = self.std_map()
+        spec1 = "FROM ('2015-01-01', MINVALUE) TO ('2016-12-31', 5)"
+        spec2 = "FROM ('2017-01-01', 11) TO ('2020-12-31', 15)"
+        inmap['schema sd'].update({'table t1': {
+            'columns': [{'c1': {'type': 'date'}}, {'c2': {'type': 'integer'}},
+                        {'c3': {'type': 'text'}}],
+            'partition_by': {'range': ['c1', 'c2']}}, 'table t1a': {
+                'partition_bound_spec': spec1, 'partition_of': 't1'},
+                'table t1b': {'partition_bound_spec': spec2,
+                              'partition_of': 't1'}})
+        sql = self.to_sql(inmap, revert=True)
+        assert fix_indent(sql[0]) == "DROP TABLE sd.t1b"
+        assert fix_indent(sql[1]) == "DROP TABLE sd.t1a"
+        assert fix_indent(sql[2]) == "DROP TABLE sd.t1"
 
 
 class TableCommentToSqlTestCase(InputMapToSqlTestCase):
@@ -432,5 +550,4 @@ class TableInheritToSqlTestCase(InputMapToSqlTestCase):
         stmts = [CREATE_STMT, "CREATE TABLE t2 (c3 numeric) INHERITS (t1)",
                  "CREATE TABLE t3 (c4 date) INHERITS (t2)"]
         sql = self.to_sql(self.std_map(), stmts)
-        assert sql == ["DROP TABLE sd.t3", "DROP TABLE sd.t2",
-                       "DROP TABLE sd.t1"]
+        assert sql == ["DROP TABLE sd.t3", "DROP TABLE sd.t2", DROP_STMT]
