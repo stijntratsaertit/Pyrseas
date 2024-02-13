@@ -61,8 +61,8 @@ class Sequence(DbClass):
     "A sequence generator definition"
 
     def __init__(self, name, schema, description, owner, privileges,
-                 start_value=1, increment_by=1, max_value=MAX_BIGINT,
-                 min_value=1, cache_value=1, data_type='bigint',
+                 start_value=1, increment_by=1, max_value=None,
+                 min_value=None, cache_value=1, data_type='bigint',
                  owner_table=None, owner_column=None,
                  oid=None):
         """Initialize the sequence
@@ -81,8 +81,8 @@ class Sequence(DbClass):
                                        privileges)
         self.start_value = start_value
         self.increment_by = increment_by
-        self.max_value = max_value
-        self.min_value = min_value
+        self.max_value = max_value or MAX_BIGINT
+        self.min_value = min_value or 1
         self.cache_value = cache_value
         self.data_type = data_type
         self.owner_table = owner_table
@@ -274,15 +274,9 @@ class Sequence(DbClass):
             stmt += " START WITH %d" % inseq.start_value
         if self.increment_by != inseq.increment_by:
             stmt += " INCREMENT BY %d" % inseq.increment_by
-        minval = self.min_value
-        if minval == 1:
-            minval = None
-        if minval != inseq.min_value:
+        if self.min_value != inseq.min_value:
             stmt += seq_min_value(inseq)
-        maxval = self.max_value
-        if maxval == MAX_BIGINT:
-            maxval = None
-        if maxval != inseq.max_value:
+        if self.max_value != inseq.max_value:
             stmt += seq_max_value(inseq)
         if self.cache_value != inseq.cache_value:
             stmt += " CACHE %d" % inseq.cache_value
@@ -298,6 +292,8 @@ class Sequence(DbClass):
                                  "owner_table but no owner_column")
             if self.owner_table is None and self.owner_column is None:
                 stmts.append(inseq.add_owner())
+        if self.owner_column is not None and inseq.owner_column is None:
+            stmts.append("ALTER SEQUENCE %s OWNED BY NONE" % self.qualname())
 
         stmts.append(super(Sequence, self).alter(inseq, no_owner=no_owner))
         return stmts

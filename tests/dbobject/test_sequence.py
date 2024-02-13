@@ -177,4 +177,4 @@ class SequenceUndoSqlTestCase(InputMapToSqlTestCase):
             'min_value': None, 'cache_value': 30}})
         sql = self.to_sql(inmap, [CREATE_STMT], revert=True)
         assert fix_indent(sql[0]) == "ALTER SEQUENCE sd.seq1 START WITH 1 " \
-            "INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+            "INCREMENT BY 1 CACHE 1"
