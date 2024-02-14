@@ -335,6 +335,28 @@ class Database(object):
         self.db.languages = LanguageDict()
         self.db.casts = CastDict()
 
+    def _copy_oldnames(self):
+        """Copy the names of the old objects to the new ones"""
+        old_all_dicts, new_all_dicts = self.db.all_dicts(), self.ndb.all_dicts()
+        for old_objtype, old_objdict in old_all_dicts:
+            for old_obj in old_objdict.values():
+                if getattr(old_obj, 'oldname', None):
+                    transfer_lookup = (old_obj.schema, old_obj.oldname)
+                    for new_objtype, new_objdict in new_all_dicts:
+                        if old_objtype != new_objtype:
+                            continue
+                        if transfer_lookup in new_objdict:
+                            obj = new_objdict[transfer_lookup]
+                            setattr(obj, 'oldname', old_obj.name)
+                            break
+
+    def _swap_states(self):
+        """Swap the db and ndb states"""
+        (self.db, self.ndb) = (self.ndb, self.db)
+        del self.ndb.schemas['pg_catalog']
+        self.db.languages.dbconn = self.dbconn
+        self._copy_oldnames()
+
     def from_catalog(self, single_db=False):
         """Populate the database objects by querying the catalogs
 
@@ -526,9 +548,7 @@ class Database(object):
 
         self.from_map(input_map)
         if opts.revert:
-            (self.db, self.ndb) = (self.ndb, self.db)
-            del self.ndb.schemas['pg_catalog']
-            self.db.languages.dbconn = self.dbconn
+            self._swap_states()
 
         # First sort the objects in the new db in dependency order
         new_objs = []

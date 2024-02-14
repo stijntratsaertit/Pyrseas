@@ -343,7 +343,7 @@ class TableUndoSqlTestCase(InputMapToSqlTestCase):
             'columns': [{'c1': {'type': 'integer'}},
                         {'c2': {'type': 'text'}}]}})
         sql = self.to_sql(inmap, [CREATE_STMT], revert=True)
-        assert sql == ["ALTER TABLE sd.t2 RENAME TO sd.t1"]
+        assert sql == ["ALTER TABLE sd.t2 RENAME TO t1"]
 
     def test_undo_create_table_options(self):
         "Revert creation of a table with options"
